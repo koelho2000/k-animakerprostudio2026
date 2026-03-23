@@ -1321,18 +1321,41 @@ Output ONLY the prompt, no preamble or explanation.`;
 // ═══════════════════════════════════════════════════════════════════════════════
 
 async function callClaude(system, user, maxTokens=4000){
-  const res = await fetch("https://api.anthropic.com/v1/messages", {
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({
-      model:"claude-sonnet-4-20250514",
+  // Use /api/claude proxy in production (Vercel) to avoid CORS.
+  // Fall back to direct API in the Claude artifact preview environment.
+  const isArtifact = typeof window !== "undefined" &&
+    (window.location.hostname === "claude.ai" ||
+     window.location.hostname.includes("anthropic") ||
+     window.location.hostname === "localhost" ||
+     window.location.hostname === "127.0.0.1");
+
+  const url = isArtifact
+    ? "https://api.anthropic.com/v1/messages"
+    : "/api/claude";
+
+  const headers = { "Content-Type": "application/json" };
+  // Direct call (artifact preview) needs the version header
+  if (isArtifact) headers["anthropic-version"] = "2023-06-01";
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
       max_tokens: maxTokens,
       system,
-      messages:[{role:"user",content:user}]
+      messages: [{ role: "user", content: user }]
     })
   });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => res.statusText);
+    throw new Error(`API error ${res.status}: ${errText.substring(0, 200)}`);
+  }
+
   const data = await res.json();
-  const text = (data.content?.[0]?.text||"").replace(/```json|```/g,"").trim();
+  if (data.error) throw new Error(data.error.message || JSON.stringify(data.error));
+  const text = (data.content?.[0]?.text || "").replace(/```json|```/g, "").trim();
   return JSON.parse(text);
 }
 
